@@ -4,21 +4,32 @@ using System.Runtime.InteropServices;
 
 namespace CritBitTree
 {
-    [StructLayout(LayoutKind.Sequential, Pack = 0)]
+    [StructLayout(LayoutKind.Explicit)]
     internal unsafe struct CritBitTreeNode
     {
         /// <summary>
         /// 0 == External, 1 == Internal
         /// </summary>
+        [FieldOffset(0)]
         public byte Type;
 
+        [FieldOffset(1)]
         public CritBitTreeNode* Child1;
 
+        [FieldOffset(9)]
         public CritBitTreeNode* Child2;
 
+        [FieldOffset(17)]
         public int Byte;
 
+        [FieldOffset(21)]
         public byte Otherbits;
+
+        [FieldOffset(1)]
+        public int KeyLength;
+
+        [FieldOffset(5)]
+        public byte Key;
     }
 
     public unsafe class CritBitTree : IDisposable
@@ -47,10 +58,7 @@ namespace CritBitTree
                     node = direction == 0 ? node->Child1 : node->Child2;
                 }
 
-                var externalNode = (byte*) node;
-                var b = externalNode + sizeof(byte);
-
-                return key.SequenceEqual(new ReadOnlySpan<byte>(b + sizeof(int), *(int*)b));
+                return key.SequenceEqual(new ReadOnlySpan<byte>(&node->Key, node->KeyLength));
             }
         }
 
@@ -61,11 +69,11 @@ namespace CritBitTree
 
             if (node == null)
             {
-                var nodeBytes = (byte*)Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength).ToPointer();
-                nodeBytes[0] = 0;
-                *(int*)(nodeBytes + sizeof(byte)) = keyLength;
-                key.CopyTo(new Span<byte>(nodeBytes + sizeof(byte) + sizeof(int), keyLength));
-                _rootNode = (CritBitTreeNode*)nodeBytes;
+                var rootNode = (CritBitTreeNode*)Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength).ToPointer();
+                rootNode->Type = 0;
+                rootNode->KeyLength = keyLength;
+                key.CopyTo(new Span<byte>(&rootNode->Key, keyLength));
+                _rootNode = rootNode;
                 return true;
             }
             
@@ -80,10 +88,10 @@ namespace CritBitTree
                 node = direction == 0 ? node->Child1 : node->Child2;
             }
 
-            #region Find the critical bit
+#region Find the critical bit
 
-            int pValueLength = *(int*) ((byte*)node + sizeof(byte));
-            byte* pValue = (byte*)node + sizeof(byte) + sizeof(int);
+            int pValueLength = node->KeyLength;
+            byte* pValue = &node->Key;
             
             int newbyte;
             uint newotherbits = 0;
@@ -118,7 +126,7 @@ namespace CritBitTree
             
             uint newdirection = (1 + (newotherbits | c)) >> 8;
 
-            #endregion
+#endregion
 
             fixed (CritBitTreeNode** rootNodeFixed = &_rootNode)
             { 
@@ -141,15 +149,12 @@ namespace CritBitTree
                     wherep = direction == 0 ? &node->Child1 : &node->Child2;
                 }
 
-                var nodePtr = Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength);
-                var nodeBytes = (byte*)nodePtr.ToPointer();
-                nodeBytes[0] = 0;
-                *(int*)(nodeBytes + sizeof(byte)) = keyLength;
-                key.CopyTo(new Span<byte>(nodeBytes + sizeof(byte) + sizeof(int), keyLength));
-                var newExternalNode = (CritBitTreeNode*)nodeBytes;
+                var newExternalNode = (CritBitTreeNode*) Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength).ToPointer();
+                newExternalNode->Type = 0;
+                newExternalNode->KeyLength = keyLength;
+                key.CopyTo(new Span<byte>(&newExternalNode->Key, keyLength));
 
-                nodePtr = Marshal.AllocHGlobal(sizeof(CritBitTreeNode));
-                var newNode = (CritBitTreeNode*)nodePtr.ToPointer();
+                var newNode = (CritBitTreeNode*) Marshal.AllocHGlobal(sizeof(CritBitTreeNode)).ToPointer();
                 newNode->Type = 1;
                 if (newdirection == 0)
                 { 
