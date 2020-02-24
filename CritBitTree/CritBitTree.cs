@@ -48,21 +48,7 @@ namespace CritBitTree
                 return false;
             }
 
-            var node = _rootNode;
-            var keyLength = key.Length;
-
-            while (node is CritBitInternalNode internalNode)
-            {
-                ushort c = 0;
-                if (internalNode.Byte < keyLength)
-                    c = key[internalNode.Byte];
-
-                int direction = (1 + (internalNode.Otherbits | c)) >> 8;
-
-                node = direction == 0 ? internalNode.Child1 : internalNode.Child2;
-            }
-
-            CritBitExternalNode<T> externalNode = (CritBitExternalNode<T>)node;
+            CritBitExternalNode<T> externalNode = FindBestMatch(key);
             if (key.SequenceEqual(externalNode.Key.Span))
             {
                 value = externalNode.Value;
@@ -73,12 +59,29 @@ namespace CritBitTree
             return false;
         }
 
-        public bool Add(in ReadOnlyMemory<byte> key, T value)
+        private CritBitExternalNode<T> FindBestMatch(in ReadOnlySpan<byte> key)
         {
             var node = _rootNode;
             var keyLength = key.Length;
 
-            if (node == null)
+            while (node is CritBitInternalNode internalNode)
+            {
+                byte c = 0;
+                if (internalNode.Byte < keyLength)
+                    c = key[internalNode.Byte];
+
+                var direction = (1 + (internalNode.Otherbits | c)) >> 8;
+                node = direction == 0 ? internalNode.Child1 : internalNode.Child2;
+            }
+
+            return (CritBitExternalNode<T>) node;
+        }
+
+        public bool Add(in ReadOnlyMemory<byte> key, T value)
+        {
+            var keyLength = key.Length;
+
+            if (_rootNode == null)
             {
                 var rootNode = new CritBitExternalNode<T>();
                 rootNode.Key = key;
@@ -88,21 +91,9 @@ namespace CritBitTree
             }
 
             var keySpan = key.Span;
-            
-            byte c;
-            while (node is CritBitInternalNode internalNode)
-            {
-                c = 0;
-                if (internalNode.Byte < keyLength)
-                    c = keySpan[internalNode.Byte];
-
-                var direction = (1 + (internalNode.Otherbits | c)) >> 8;
-                node = direction == 0 ? internalNode.Child1 : internalNode.Child2;
-            }
+            var externalNode = FindBestMatch(keySpan);
 
 #region Find the critical bit
-
-            var externalNode = (CritBitExternalNode<T>) node;
 
             int pValueLength = externalNode.Key.Length;
             ReadOnlySpan<byte> pValue = externalNode.Key.Span;
@@ -136,7 +127,7 @@ namespace CritBitTree
             newotherbits |= newotherbits >> 4;
             newotherbits = (newotherbits & ~ (newotherbits >> 1)) ^ 255;
 
-            c = pValueLength > newbyte ? pValue[newbyte] : (byte) 0;
+            var c = pValueLength > newbyte ? pValue[newbyte] : (byte) 0;
             
             uint newdirection = (1 + (newotherbits | c)) >> 8;
 
@@ -148,7 +139,7 @@ namespace CritBitTree
 
             while (true)
             {
-                node = wherep;
+                var node = wherep;
                 if (!(node is CritBitInternalNode internalNode))
                     break;
                 
@@ -225,5 +216,60 @@ namespace CritBitTree
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public bool Remove(in ReadOnlySpan<byte> key)
+        {
+            if (_rootNode == null)
+                return false;
+
+            var node = _rootNode;
+            var keyLength = key.Length;
+            ICritBitNode parent = null;
+            int parentDirection = -1;
+            ICritBitNode grandParent = null;
+            int grandParentDirection = -1;
+
+            while (node is CritBitInternalNode internalNode)
+            {
+                byte c = 0;
+                if (internalNode.Byte < keyLength)
+                    c = key[internalNode.Byte];
+
+                var direction = (1 + (internalNode.Otherbits | c)) >> 8;
+                grandParent = parent;
+                grandParentDirection = parentDirection;
+                parent = node;
+                parentDirection = direction;
+                node = direction == 0 ? internalNode.Child1 : internalNode.Child2;
+            }
+
+            var externalNode = (CritBitExternalNode<T>) node;
+
+            if (!key.SequenceEqual(externalNode.Key.Span))
+                return false;
+
+            if (grandParent == null)
+            {
+                _rootNode = null;
+                return true;
+            }
+            
+            if (grandParentDirection == 0)
+            { 
+                if (parentDirection == 0)
+                    ((CritBitInternalNode)grandParent).Child1 = ((CritBitInternalNode)parent).Child2;
+                else
+                    ((CritBitInternalNode)grandParent).Child1 = ((CritBitInternalNode)parent).Child1;
+            }
+            else
+            {
+                if (parentDirection == 0)
+                    ((CritBitInternalNode)grandParent).Child2 = ((CritBitInternalNode)parent).Child2;
+                else
+                    ((CritBitInternalNode)grandParent).Child2 = ((CritBitInternalNode)parent).Child1;
+            }
+
+            return true;
+        }
     }
 }
