@@ -26,21 +26,20 @@ namespace CritBitTree
         private CritBitTreeNode* _rootNode;
 
         [Pure]
-        public bool Contains(Span<byte> bytes)
+        public bool Contains(in ReadOnlySpan<byte> key)
         {
             if (_rootNode == null)
                 return false;
 
             var node = _rootNode;
+            var keyLength = key.Length;
 
-            var ulen = bytes.Length;
-
-            fixed (byte* ubytes = bytes)
+            fixed (byte* ubytes = key)
             {
                 while (node->Type == 1)
                 {
                     ushort c = 0;
-                    if (node->Byte < ulen)
+                    if (node->Byte < keyLength)
                         c = ubytes[node->Byte];
 
                     int direction = (1 + (node->Otherbits | c)) >> 8;
@@ -51,81 +50,65 @@ namespace CritBitTree
                 var externalNode = (byte*) node;
                 var b = externalNode + sizeof(byte);
 
-                return bytes.SequenceEqual(new ReadOnlySpan<byte>(b + sizeof(int), *(int*)b));
+                return key.SequenceEqual(new ReadOnlySpan<byte>(b + sizeof(int), *(int*)b));
             }
         }
 
-        public bool Add(Span<byte> u)
+        public bool Add(in ReadOnlySpan<byte> key)
         {
-            var ubytes = u;
-            var ulen = u.Length;
+            var node = _rootNode;
+            var keyLength = key.Length;
 
-            var p = _rootNode;
-
-            #region Deal with inserting into an empty tree
-
-            if (p == null)
+            if (node == null)
             {
-                var rootNode = Marshal.AllocHGlobal(sizeof(int) + sizeof(byte) * (u.Length + 1));
-                byte* rootNodePointer = (byte*) rootNode.ToPointer();
-                rootNodePointer[0] = 0;
-                *(int*)(rootNodePointer + sizeof(byte)) = u.Length;
-
-                u.CopyTo(new Span<byte>(rootNodePointer + sizeof(byte) + sizeof(int), u.Length));
-
-                _rootNode = (CritBitTreeNode*) rootNodePointer;
+                var nodeBytes = (byte*)Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength).ToPointer();
+                nodeBytes[0] = 0;
+                *(int*)(nodeBytes + sizeof(byte)) = keyLength;
+                key.CopyTo(new Span<byte>(nodeBytes + sizeof(byte) + sizeof(int), keyLength));
+                _rootNode = (CritBitTreeNode*)nodeBytes;
                 return true;
             }
-
-            #endregion
-
+            
             byte c;
-            while (p->Type == 1)
+            while (node->Type == 1)
             {
-                var q = p;
                 c = 0;
-                if (q->Byte < ulen)
-                    c = ubytes[q->Byte];
+                if (node->Byte < keyLength)
+                    c = key[node->Byte];
 
-                var direction = (1 + (q->Otherbits | c)) >> 8;
-                p = direction == 0 ? q->Child1 : q->Child2;
+                var direction = (1 + (node->Otherbits | c)) >> 8;
+                node = direction == 0 ? node->Child1 : node->Child2;
             }
-
-            var bestMember = p;
 
             #region Find the critical bit
 
-            int pValueLength = *(int*) ((byte*)bestMember + sizeof(byte));
-            byte* pValue = (byte*)bestMember + sizeof(byte) + sizeof(int);
+            int pValueLength = *(int*) ((byte*)node + sizeof(byte));
+            byte* pValue = (byte*)node + sizeof(byte) + sizeof(int);
             
             int newbyte;
-            uint newotherbits;
+            uint newotherbits = 0;
+            bool differentByteFound = false;
 
-            for (newbyte = 0; newbyte < ulen; newbyte++)
+            for (newbyte = 0; newbyte < keyLength; newbyte++)
             {
                 if (newbyte >= pValueLength)
                 {
-                    newotherbits = ubytes[newbyte];
-                    goto different_byte_found;
+                    newotherbits = key[newbyte];
+                    differentByteFound = true;
+                    break;
                 }
 
-                if (pValue[newbyte] != ubytes[newbyte])
+                if (pValue[newbyte] != key[newbyte])
                 {
-                    newotherbits = (uint) (pValue[newbyte] ^ ubytes[newbyte]);
-                    goto different_byte_found;
+                    newotherbits = (uint) (pValue[newbyte] ^ key[newbyte]);
+                    differentByteFound = true;
+                    break;
                 }
             }
 
-            if (pValueLength > newbyte)
-            {
-                newotherbits = pValue[newbyte];
-                goto different_byte_found;
-            }
+            if (!differentByteFound)
+                return false;
 
-            return false;
-
-            different_byte_found:
-            
             newotherbits |= newotherbits >> 1;
             newotherbits |= newotherbits >> 2;
             newotherbits |= newotherbits >> 4;
@@ -137,66 +120,52 @@ namespace CritBitTree
 
             #endregion
 
-            var newNodeIntPtr = Marshal.AllocHGlobal(sizeof(CritBitTreeNode));
-            var newNode = (CritBitTreeNode*)newNodeIntPtr.ToPointer();
-            newNode->Type = 1;
-            newNode->Byte = newbyte;
-            newNode->Otherbits = (byte) newotherbits;
-            newNode->Child1 = null;
-            newNode->Child2 = null;
+            fixed (CritBitTreeNode** rootNodeFixed = &_rootNode)
+            { 
+                var wherep = rootNodeFixed;
 
-            var newExternalNode = Marshal.AllocHGlobal(sizeof(int) + sizeof(byte) * (ubytes.Length + 1));
-            var newExternalNodePointer = (byte*) newExternalNode.ToPointer();
-            newExternalNodePointer[0] = 0;
-            *(int*) (newExternalNodePointer + sizeof(byte)) = ubytes.Length;
-            u.CopyTo(new Span<byte>(newExternalNodePointer + sizeof(byte) + sizeof(int), u.Length));
-
-            if (1 - newdirection == 0)
-                newNode->Child1 = (CritBitTreeNode*) newExternalNodePointer;
-            else
-                newNode->Child2 = (CritBitTreeNode*) newExternalNodePointer;
-
-            var wherep = _rootNode;
-            
-            var isRootNode = true;
-
-            var direction1 = 0;
-            CritBitTreeNode* lastNode = null;
-            while (true)
-            {
-                p = wherep;
-                if (p->Type == 0)
-                    break;
+                var direction = 0;
+                while (true)
+                {
+                    node = *wherep;
+                    if (node->Type == 0)
+                        break;
                 
-                var q = p;
+                    if (node->Byte > newbyte) break;
+                    if (node->Byte == newbyte && node->Otherbits > newotherbits) break;
 
-                if (q->Byte > newbyte) break;
-                if (q->Byte == newbyte && p->Otherbits > newotherbits) break;
+                    c = 0;
+                    if (node->Byte < keyLength)
+                        c = key[node->Byte];
+                    direction = (1 + (node->Otherbits | c)) >> 8;
+                    wherep = direction == 0 ? &node->Child1 : &node->Child2;
+                }
 
-                c = 0;
-                if (q->Byte < u.Length)
-                    c = ubytes[q->Byte];
-                direction1 = (1 + (q->Otherbits | c)) >> 8;
-                wherep = direction1 == 0 ? q->Child1 : q->Child2;
-                isRootNode = false;
-                lastNode = q;
-            }
+                var nodePtr = Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength);
+                var nodeBytes = (byte*)nodePtr.ToPointer();
+                nodeBytes[0] = 0;
+                *(int*)(nodeBytes + sizeof(byte)) = keyLength;
+                key.CopyTo(new Span<byte>(nodeBytes + sizeof(byte) + sizeof(int), keyLength));
+                var newExternalNode = (CritBitTreeNode*)nodeBytes;
 
-            if (newdirection == 0)
-                newNode->Child1 = wherep;
-            else
-                newNode->Child2 = wherep;
-
-            if (isRootNode)
-                _rootNode = newNode;
-            else
-            {
-                if (direction1 == 0)
-                    lastNode->Child1 = newNode;
+                nodePtr = Marshal.AllocHGlobal(sizeof(CritBitTreeNode));
+                var newNode = (CritBitTreeNode*)nodePtr.ToPointer();
+                newNode->Type = 1;
+                if (newdirection == 0)
+                { 
+                    newNode->Child1 = *wherep;
+                    newNode->Child2 = newExternalNode;
+                }
                 else
-                    lastNode->Child2 = newNode;
+                {
+                    newNode->Child1 = newExternalNode;
+                    newNode->Child2 = *wherep;
+                }
+                newNode->Byte = newbyte;
+                newNode->Otherbits = (byte)newotherbits;
+
+                *wherep = newNode;
             }
-                
 
             return true;
         }

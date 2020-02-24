@@ -56,6 +56,10 @@ namespace CritBitTree.Tests
             Assert.IsTrue(critBitTree.Add(Encoding.ASCII.GetBytes("ulululu2")));
             Assert.IsTrue(critBitTree.Add(Encoding.ASCII.GetBytes("ulululu3")));
             Assert.IsTrue(critBitTree.Add(Encoding.ASCII.GetBytes("ulululu4")));
+
+            var longBytes = new byte[1000];
+            Assert.IsTrue(critBitTree.Add(longBytes));
+            Assert.IsTrue(critBitTree.Contains(longBytes));
         }
     }
 }
