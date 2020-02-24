@@ -10,12 +10,12 @@ namespace CritBitTree
         private byte[][] _all;
         private int _current = -1;
 
-        public CritBitTreeNodeEnumerator(CritBitTreeNode* rootNode)
+        public CritBitTreeNodeEnumerator(UnmanagedCritBitTreeNode* rootNode)
         {
             _all = GetAll(rootNode);
         }
 
-        private byte[][] GetAll(CritBitTreeNode* node)
+        private byte[][] GetAll(UnmanagedCritBitTreeNode* node)
         {
             if (node->Type == 0)
             {

@@ -6,94 +6,106 @@ using System.Runtime.InteropServices;
 
 namespace CritBitTree
 {
-    [StructLayout(LayoutKind.Explicit)]
-    internal unsafe struct CritBitTreeNode
+    [StructLayout(LayoutKind.Auto, Pack = 1)]
+    internal class CritBitInternalNode : ICritBitNode
     {
-        /// <summary>
-        /// 0 == External, 1 == Internal
-        /// </summary>
-        [FieldOffset(0)]
-        public byte Type;
+        public ICritBitNode Child1;
 
-        [FieldOffset(1)]
-        public CritBitTreeNode* Child1;
+        public ICritBitNode Child2;
 
-        [FieldOffset(9)]
-        public CritBitTreeNode* Child2;
-
-        [FieldOffset(17)]
         public int Byte;
 
-        [FieldOffset(21)]
         public byte Otherbits;
-
-        [FieldOffset(1)]
-        public int KeyLength;
-
-        [FieldOffset(5)]
-        public byte Key;
     }
 
-    public unsafe class CritBitTree : IEnumerable<byte[]>, IDisposable
+    [StructLayout(LayoutKind.Auto, Pack = 1)]
+    internal class CritBitExternalNode<T> : ICritBitNode
     {
-        private CritBitTreeNode* _rootNode;
+        public ReadOnlyMemory<byte> Key;
+
+        public T Value;
+    }
+
+    internal interface ICritBitNode
+    {
+    }
+
+    public class CritBitTree<T> : IEnumerable<T>
+    {
+        private ICritBitNode _rootNode;
 
         [Pure]
-        public bool Contains(in ReadOnlySpan<byte> key)
+        public bool ContainsKey(in ReadOnlySpan<byte> key)
+        {
+            return TryGetValue(key, out _);
+        }
+
+        public bool TryGetValue(in ReadOnlySpan<byte> key, out T value)
         {
             if (_rootNode == null)
+            {
+                value = default;
                 return false;
+            }
 
             var node = _rootNode;
             var keyLength = key.Length;
 
-            fixed (byte* ubytes = key)
+            while (node is CritBitInternalNode internalNode)
             {
-                while (node->Type == 1)
-                {
-                    ushort c = 0;
-                    if (node->Byte < keyLength)
-                        c = ubytes[node->Byte];
+                ushort c = 0;
+                if (internalNode.Byte < keyLength)
+                    c = key[internalNode.Byte];
 
-                    int direction = (1 + (node->Otherbits | c)) >> 8;
+                int direction = (1 + (internalNode.Otherbits | c)) >> 8;
 
-                    node = direction == 0 ? node->Child1 : node->Child2;
-                }
-
-                return key.SequenceEqual(new ReadOnlySpan<byte>(&node->Key, node->KeyLength));
+                node = direction == 0 ? internalNode.Child1 : internalNode.Child2;
             }
+
+            CritBitExternalNode<T> externalNode = (CritBitExternalNode<T>)node;
+            if (key.SequenceEqual(externalNode.Key.Span))
+            {
+                value = externalNode.Value;
+                return true;
+            }
+
+            value = default;
+            return false;
         }
 
-        public bool Add(in ReadOnlySpan<byte> key)
+        public bool Add(in ReadOnlyMemory<byte> key, T value)
         {
             var node = _rootNode;
             var keyLength = key.Length;
 
             if (node == null)
             {
-                var rootNode = (CritBitTreeNode*)Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength).ToPointer();
-                rootNode->Type = 0;
-                rootNode->KeyLength = keyLength;
-                key.CopyTo(new Span<byte>(&rootNode->Key, keyLength));
+                var rootNode = new CritBitExternalNode<T>();
+                rootNode.Key = key;
+                rootNode.Value = value;
                 _rootNode = rootNode;
                 return true;
             }
+
+            var keySpan = key.Span;
             
             byte c;
-            while (node->Type == 1)
+            while (node is CritBitInternalNode internalNode)
             {
                 c = 0;
-                if (node->Byte < keyLength)
-                    c = key[node->Byte];
+                if (internalNode.Byte < keyLength)
+                    c = keySpan[internalNode.Byte];
 
-                var direction = (1 + (node->Otherbits | c)) >> 8;
-                node = direction == 0 ? node->Child1 : node->Child2;
+                var direction = (1 + (internalNode.Otherbits | c)) >> 8;
+                node = direction == 0 ? internalNode.Child1 : internalNode.Child2;
             }
 
 #region Find the critical bit
 
-            int pValueLength = node->KeyLength;
-            byte* pValue = &node->Key;
+            var externalNode = (CritBitExternalNode<T>) node;
+
+            int pValueLength = externalNode.Key.Length;
+            ReadOnlySpan<byte> pValue = externalNode.Key.Span;
             
             int newbyte;
             uint newotherbits = 0;
@@ -103,14 +115,14 @@ namespace CritBitTree
             {
                 if (newbyte >= pValueLength)
                 {
-                    newotherbits = key[newbyte];
+                    newotherbits = keySpan[newbyte];
                     differentByteFound = true;
                     break;
                 }
 
-                if (pValue[newbyte] != key[newbyte])
+                if (pValue[newbyte] != keySpan[newbyte])
                 {
-                    newotherbits = (uint) (pValue[newbyte] ^ key[newbyte]);
+                    newotherbits = (uint) (pValue[newbyte] ^ keySpan[newbyte]);
                     differentByteFound = true;
                     break;
                 }
@@ -129,88 +141,89 @@ namespace CritBitTree
             uint newdirection = (1 + (newotherbits | c)) >> 8;
 
 #endregion
+            
+            var wherep = _rootNode;
+            CritBitInternalNode parent = null;
+            int parentDirection = -1;
 
-            fixed (CritBitTreeNode** rootNodeFixed = &_rootNode)
-            { 
-                var wherep = rootNodeFixed;
-                while (true)
-                {
-                    node = *wherep;
-                    if (node->Type == 0)
-                        break;
+            while (true)
+            {
+                node = wherep;
+                if (!(node is CritBitInternalNode internalNode))
+                    break;
                 
-                    if (node->Byte > newbyte) break;
-                    if (node->Byte == newbyte && node->Otherbits > newotherbits) break;
+                if (internalNode.Byte > newbyte) break;
+                if (internalNode.Byte == newbyte && internalNode.Otherbits > newotherbits) break;
 
-                    c = 0;
-                    if (node->Byte < keyLength)
-                        c = key[node->Byte];
-                    var direction = (1 + (node->Otherbits | c)) >> 8;
-                    wherep = direction == 0 ? &node->Child1 : &node->Child2;
-                }
+                c = 0;
+                if (internalNode.Byte < keyLength)
+                    c = keySpan[internalNode.Byte];
+                var direction = (1 + (internalNode.Otherbits | c)) >> 8;
+                parent = internalNode;
+                parentDirection = direction;
+                wherep = direction == 0 ? internalNode.Child1 : internalNode.Child2;
+            }
 
-                var newExternalNode = (CritBitTreeNode*) Marshal.AllocHGlobal(sizeof(byte) + sizeof(int) + sizeof(byte) * keyLength).ToPointer();
-                newExternalNode->Type = 0;
-                newExternalNode->KeyLength = keyLength;
-                key.CopyTo(new Span<byte>(&newExternalNode->Key, keyLength));
+            var newExternalNode = new CritBitExternalNode<T>();
+            newExternalNode.Key = key;
+            newExternalNode.Value = value;
 
-                var newNode = (CritBitTreeNode*) Marshal.AllocHGlobal(sizeof(CritBitTreeNode)).ToPointer();
-                newNode->Type = 1;
-                if (newdirection == 0)
-                { 
-                    newNode->Child1 = *wherep;
-                    newNode->Child2 = newExternalNode;
-                }
+            var newNode = new CritBitInternalNode();
+            if (newdirection == 0)
+            { 
+                newNode.Child1 = wherep;
+                newNode.Child2 = newExternalNode;
+            }
+            else
+            {
+                newNode.Child1 = newExternalNode;
+                newNode.Child2 = wherep;
+            }
+            newNode.Byte = newbyte;
+            newNode.Otherbits = (byte)newotherbits;
+
+            if (parent == null)
+                _rootNode = newNode;
+            else
+            {
+                if (parentDirection == 0)
+                    parent.Child1 = newNode;
                 else
-                {
-                    newNode->Child1 = newExternalNode;
-                    newNode->Child2 = *wherep;
-                }
-                newNode->Byte = newbyte;
-                newNode->Otherbits = (byte)newotherbits;
-
-                *wherep = newNode;
+                    parent.Child2 = newNode;
             }
 
             return true;
         }
 
-        public void Dispose()
+        public IEnumerator<T> GetEnumerator()
         {
-            DisposeManaged();
-            GC.SuppressFinalize(this);
+            if (_rootNode == null)
+                yield break;
+
+            foreach (var item in GetItems(_rootNode))
+                yield return item;
         }
 
-        public void DisposeManaged()
+        private IEnumerable<T> GetItems(ICritBitNode node)
         {
-            var node = _rootNode;
-            Dispose(node);
-        }
-
-        ~CritBitTree()
-        {
-            DisposeManaged();
-        }
-
-        private void Dispose(CritBitTreeNode* node)
-        {
-            if (node->Type == 1)
+            if (node is CritBitExternalNode<T> externalNode)
             {
-                Dispose(node->Child1);
-                Dispose(node->Child2);
+                yield return externalNode.Value;
+                yield break;
             }
 
-            Marshal.FreeHGlobal(new IntPtr(node));
+            var internalNode = (CritBitInternalNode)node;
+            foreach (var item in GetItems(internalNode.Child1))
+            {
+                yield return item;
+            }
+
+            foreach (var item in GetItems(internalNode.Child2))
+            {
+                yield return item;
+            }
         }
 
-        public IEnumerator<byte[]> GetEnumerator()
-        {
-            return new CritBitTreeNodeEnumerator(_rootNode);
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
-        }
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

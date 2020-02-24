@@ -4,12 +4,12 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace CritBitTree.Tests
 {
     [TestClass]
-    public class SafeTest
+    public class ManagedVersionTest
     {
         [TestMethod]
         public void TestMethod1()
         {
-            var critBitTree = new CritBitTreeSafe<object>();
+            var critBitTree = new CritBitTree<object>();
 
             var helloWorldBytes = Encoding.ASCII.GetBytes("Hello world");
             var result = critBitTree.Add(helloWorldBytes, null);
