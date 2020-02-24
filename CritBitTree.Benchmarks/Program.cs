@@ -20,16 +20,19 @@ namespace CritBitTree.Benchmarks
 #if DEBUG
             var program = new Program();
             program.Setup();
-            program.CritBitTree();
-            program.HashSet();
+            //program.CritBitTreeSafe();
+            //program.HashSet();
 #endif
         }
 
-        private const int Elements = 100;
+        private const int Elements = 10000;
         private readonly byte[][] _bytes = new byte[Elements][];
-        private const int Lookups = 100;
-        private readonly HashSet<byte[]> _hashSet = new HashSet<byte[]>();
-        private readonly CritBitTree _critBitTree = new CritBitTree();
+        private const int Lookups = 1000;
+        private readonly HashSet<byte[]> _hashSet = new HashSet<byte[]>(new Bytearraycomparer());
+        private readonly CritBitTreeSafe<object> _critBitTree = new CritBitTreeSafe<object>();
+        private readonly Dictionary<byte[], object> _dictionary = new Dictionary<byte[], object>(new Bytearraycomparer());
+
+        private static readonly char[] Chars = new char[] {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 
         [GlobalSetup]
         public void Setup()
@@ -39,55 +42,58 @@ namespace CritBitTree.Benchmarks
             for (int i = 0; i < _bytes.Length; i++)
             {
                 var bytes = new byte[20];
-                random.NextBytes(bytes);
+                for (int j = 0; j < 20; j++)
+                {
+                    bytes[j] = (byte)Chars[random.Next(0, 15)];
+                }
                 _bytes[i] = bytes;
 
                 _hashSet.Add(bytes);
-                _critBitTree.Add(bytes);
+                _critBitTree.Add(bytes, null);
             }
         }
 
-        [Benchmark, BenchmarkCategory("Combined")]
-        public void CritBitTreeCombined()
-        {
-            var random = new Random(1234);
+        //[Benchmark, BenchmarkCategory("Combined")]
+        //public void CritBitTreeSafeCombined()
+        //{
+        //    var random = new Random(1234);
 
-            using var critBitTree = new CritBitTree();
-            foreach (var b in _bytes)
-            {
-                critBitTree.Add(b);
-            }
+        //    using var CritBitTreeSafe = new CritBitTreeSafe();
+        //    foreach (var b in _bytes)
+        //    {
+        //        CritBitTreeSafe.Add(b);
+        //    }
 
-            for (int i = 0; i < Lookups; i++)
-            {
-                critBitTree.Contains(_bytes[random.Next(0, Elements - 1)]);
-            }
-        }
+        //    for (int i = 0; i < Lookups; i++)
+        //    {
+        //        CritBitTreeSafe.Contains(_bytes[random.Next(0, Elements - 1)]);
+        //    }
+        //}
 
-        [Benchmark(Baseline = true), BenchmarkCategory("Combined")]
-        public void HashSetCombined()
-        {
-            var random = new Random(1234);
+        //[Benchmark(Baseline = true), BenchmarkCategory("Combined")]
+        //public void HashSetCombined()
+        //{
+        //    var random = new Random(1234);
 
-            var hashSet = new HashSet<byte[]>(new Bytearraycomparer());
-            foreach (var b in _bytes)
-            {
-                hashSet.Add(b);
-            }
+        //    var hashSet = new HashSet<byte[]>(new Bytearraycomparer());
+        //    foreach (var b in _bytes)
+        //    {
+        //        hashSet.Add(b);
+        //    }
 
-            for (int i = 0; i < Lookups; i++)
-            {
-                hashSet.Contains(_bytes[random.Next(0, Elements - 1)]);
-            }
-        }
+        //    for (int i = 0; i < Lookups; i++)
+        //    {
+        //        hashSet.Contains(_bytes[random.Next(0, Elements - 1)]);
+        //    }
+        //}
 
         [Benchmark, BenchmarkCategory("Add")]
         public void CritBitAdd()
         {
-            using var critbit = new CritBitTree();
+            var critbit = new CritBitTreeSafe<object>();
             foreach (var b in _bytes)
             {
-                critbit.Add(b);
+                critbit.Add(b, null);
             }
         }
 
@@ -101,6 +107,16 @@ namespace CritBitTree.Benchmarks
             }
         }
 
+        [Benchmark, BenchmarkCategory("Add")]
+        public void DictionaryAdd()
+        {
+            var hashSet = new Dictionary<byte[], object>(new Bytearraycomparer());
+            foreach (var b in _bytes)
+            {
+                hashSet.Add(b, null);
+            }
+        }
+
         [Benchmark, BenchmarkCategory("Contains")]
         public void CritBitContains()
         {
@@ -108,7 +124,7 @@ namespace CritBitTree.Benchmarks
 
             for (int i = 0; i < Lookups; i++)
             {
-                _critBitTree.Contains(_bytes[random.Next(0, Elements - 1)]);
+                _critBitTree.ContainsKey(_bytes[random.Next(0, Elements - 1)]);
             }
         }
 
@@ -120,6 +136,17 @@ namespace CritBitTree.Benchmarks
             for (int i = 0; i < Lookups; i++)
             {
                 _hashSet.Contains(_bytes[random.Next(0, Elements - 1)]);
+            }
+        }
+
+        [Benchmark, BenchmarkCategory("Contains")]
+        public void DictionaryContains()
+        {
+            var random = new Random(1234);
+
+            for (int i = 0; i < Lookups; i++)
+            {
+                _dictionary.ContainsKey(_bytes[random.Next(0, Elements - 1)]);
             }
         }
     }

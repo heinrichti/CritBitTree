@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.Runtime.InteropServices;
 
@@ -32,7 +34,7 @@ namespace CritBitTree
         public byte Key;
     }
 
-    public unsafe class CritBitTree : IDisposable
+    public unsafe class CritBitTree : IEnumerable<byte[]>, IDisposable
     {
         private CritBitTreeNode* _rootNode;
 
@@ -131,8 +133,6 @@ namespace CritBitTree
             fixed (CritBitTreeNode** rootNodeFixed = &_rootNode)
             { 
                 var wherep = rootNodeFixed;
-
-                var direction = 0;
                 while (true)
                 {
                     node = *wherep;
@@ -145,7 +145,7 @@ namespace CritBitTree
                     c = 0;
                     if (node->Byte < keyLength)
                         c = key[node->Byte];
-                    direction = (1 + (node->Otherbits | c)) >> 8;
+                    var direction = (1 + (node->Otherbits | c)) >> 8;
                     wherep = direction == 0 ? &node->Child1 : &node->Child2;
                 }
 
@@ -201,6 +201,16 @@ namespace CritBitTree
             }
 
             Marshal.FreeHGlobal(new IntPtr(node));
+        }
+
+        public IEnumerator<byte[]> GetEnumerator()
+        {
+            return new CritBitTreeNodeEnumerator(_rootNode);
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return GetEnumerator();
         }
     }
 }
