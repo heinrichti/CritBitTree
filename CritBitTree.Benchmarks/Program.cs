@@ -3,11 +3,12 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Diagnostics.Windows.Configs;
 using BenchmarkDotNet.Running;
 
 namespace CritBitTree.Benchmarks
 {
-    //[NativeMemoryProfiler]
+    [NativeMemoryProfiler]
     [MemoryDiagnoser]
     [GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
     [CategoriesColumn]
@@ -15,15 +16,15 @@ namespace CritBitTree.Benchmarks
     {
         static void Main(string[] args)
         {
-#if RELEASE
+//#if RELEASE
             BenchmarkRunner.Run<Program>();
-#endif
-#if DEBUG
-            var program = new Program();
-            program.Setup();
-            //program.CritBitTreeSafe();
-            //program.HashSet();
-#endif
+//#endif
+//#if DEBUG
+//            var program = new Program();
+//            program.Setup();
+//            //program.CritBitTreeSafe();
+//            //program.HashSet();
+//#endif
         }
 
         private const int Elements = 1000;
@@ -104,9 +105,9 @@ namespace CritBitTree.Benchmarks
         }
 
         [Benchmark, BenchmarkCategory("Add")]
-        public void CritBitAdd()
+        public void CritBitAddUnmanaged()
         {
-            var critbit = new UnmanagedCritBitTree();
+            using var critbit = new UnmanagedCritBitTree();
             foreach (var b in _bytes)
             {
                 critbit.Add(b);
@@ -123,25 +124,25 @@ namespace CritBitTree.Benchmarks
             }
         }
 
-        [Benchmark, BenchmarkCategory("Add")]
-        public void DictionaryAdd()
-        {
-            var hashSet = new Dictionary<byte[], object>(new Bytearraycomparer());
-            foreach (var b in _bytes)
-            {
-                hashSet.Add(b, null);
-            }
-        }
+        //[Benchmark, BenchmarkCategory("Add")]
+        //public void DictionaryAdd()
+        //{
+        //    var hashSet = new Dictionary<byte[], object>(new Bytearraycomparer());
+        //    foreach (var b in _bytes)
+        //    {
+        //        hashSet.Add(b, null);
+        //    }
+        //}
 
-        [Benchmark, BenchmarkCategory("Add")]
-        public void ConcurrentDictionaryAdd()
-        {
-            var hashSet = new ConcurrentDictionary<byte[], object>(new Bytearraycomparer());
-            foreach (var b in _bytes)
-            {
-                hashSet.TryAdd(b, null);
-            }
-        }
+        //[Benchmark, BenchmarkCategory("Add")]
+        //public void ConcurrentDictionaryAdd()
+        //{
+        //    var hashSet = new ConcurrentDictionary<byte[], object>(new Bytearraycomparer());
+        //    foreach (var b in _bytes)
+        //    {
+        //        hashSet.TryAdd(b, null);
+        //    }
+        //}
 
         [Benchmark, BenchmarkCategory("Contains")]
         public void CritBitContains()
@@ -161,7 +162,7 @@ namespace CritBitTree.Benchmarks
 
             for (int i = 0; i < Lookups; i++)
             {
-                _critBitTree.ContainsKey(_bytes[random.Next(0, Elements - 1)]);
+                _critBitTreeUnmanaged.Contains(_bytes[random.Next(0, Elements - 1)]);
             }
         }
 
@@ -176,26 +177,26 @@ namespace CritBitTree.Benchmarks
             }
         }
 
-        [Benchmark, BenchmarkCategory("Contains")]
-        public void DictionaryContains()
-        {
-            var random = new Random(1234);
+        //[Benchmark, BenchmarkCategory("Contains")]
+        //public void DictionaryContains()
+        //{
+        //    var random = new Random(1234);
 
-            for (int i = 0; i < Lookups; i++)
-            {
-                _dictionary.ContainsKey(_bytes[random.Next(0, Elements - 1)]);
-            }
-        }
+        //    for (int i = 0; i < Lookups; i++)
+        //    {
+        //        _dictionary.ContainsKey(_bytes[random.Next(0, Elements - 1)]);
+        //    }
+        //}
 
-        [Benchmark, BenchmarkCategory("Contains")]
-        public void ConcurrentDictionaryContains()
-        {
-            var random = new Random(1234);
+        //[Benchmark, BenchmarkCategory("Contains")]
+        //public void ConcurrentDictionaryContains()
+        //{
+        //    var random = new Random(1234);
 
-            for (int i = 0; i < Lookups; i++)
-            {
-                _concurrentDictionary.ContainsKey(_bytes[random.Next(0, Elements - 1)]);
-            }
-        }
+        //    for (int i = 0; i < Lookups; i++)
+        //    {
+        //        _concurrentDictionary.ContainsKey(_bytes[random.Next(0, Elements - 1)]);
+        //    }
+        //}
     }
 }
